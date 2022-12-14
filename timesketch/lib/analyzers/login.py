@@ -47,7 +47,21 @@ def parse_evtx_logoff_event(string_list):
 
     return attributes
 
+def parse_ntlm_logon_event(string_list, string_parsed):
+    if len(string_list) < 4:
+        return {}
 
+    if not string_parsed:
+        string_parsed = {}
+        
+    attributes = {}
+    attributes["logon_type"] = "NTLM"
+    attributes["username"] = string_parsed.get("target_user_name", string_list[1])
+    attributes["workstation"] = string_parsed.get("workstation", string_list[2])
+    attributes["status"] = string_parsed.get("status", string_list[3])
+    return attributes
+        
+        
 def parse_evtx_logon_event(string_list, string_parsed):
     """Parse logon events and return a count of event processed.
 
@@ -112,6 +126,28 @@ def parse_evtx_logon_event(string_list, string_parsed):
 
     return attributes
 
+def parse_rdp_logon_event(string_list, string_parsed, event_id):
+    if len(string_list) < 3:
+        return {}
+    if not string_parsed:
+        string_parsed = {}
+       
+    attributes = {}
+    attributes["logon_type"] = LOGON_TYPES.get("RDP")
+    if event_id == 1149:
+        attributes["username"] = string_list[0]
+        attributes["windows_domain"] = string_list[1]
+        attributes["source_address"] = string_list[2]
+    elif event_id == 21 and string_list[2] != "LOCAL":
+        attributes["source_address"] = string_parsed.get("address", string_list[2])
+        attributes["username"] = string_parsed.get("user", string_list[0])
+        attributes["session_id"] = string_parsed.get("session_id", string_list[1])
+        username = string_list[0].split("\\")
+        if len(username) > 1:
+            attributes["username"] = username[-1]
+            attributes["windows_domain"] = username[0]
+    return attributes
+
 
 class LoginSketchPlugin(interface.BaseAnalyzer):
     """Analyzer for Login and Logoff related activity."""
@@ -133,14 +169,15 @@ class LoginSketchPlugin(interface.BaseAnalyzer):
         screen_emoji = emojis.get_emoji("screen")
         screensaver_logon = LOGON_TYPES.get("7")
         login_counter = 0
+        rdp_login_counter = 0
         logoff_counter = 0
 
         # TODO: Add EVT lookups, ID 528 for logon and 538, 540 for logoff.
         # TODO: Add RDP EVT lookups, ID 682 for logon and 683 for logoff.
         query = (
-            'data_type:"windows:evtx:record" AND (event_identifier:4624 OR '
-            "event_identifier:4778 OR event_identifier:4779 OR "
-            "event_identifier:4634 OR event_identifier:4647)"
+            'data_type:"windows:evtx:record" AND '
+            '(event_identifier:(4624 OR 4634 OR 4647 OR 4776 OR 4778 OR 4779) OR '
+            "(source_name:TerminalServices AND event_identifier:(21 OR 1149)"
         )
 
         return_fields = [
@@ -174,13 +211,25 @@ class LoginSketchPlugin(interface.BaseAnalyzer):
                     )
                     continue
 
-            if identifier == 4624:
-                attribute_dict = parse_evtx_logon_event(strings, strings_parsed)
+            if identifier in (4624, 4776):
+                if identifier == 4776:
+                    attribute_dict = parse_ntlm_logon_event(strings, strings_parsed)
+                else: 
+                    attribute_dict = parse_evtx_logon_event(strings, strings_parsed)
                 if not attribute_dict:
                     continue
                 emojis_to_add.append(login_emoji)
                 tags_to_add.append("logon-event")
                 login_counter += 1
+            
+            elif identifier in (21, 1149):
+                attribute_dict = parse_rdp_logon_event(strings, strings_parsed, identifier)
+                if not attribute_dict:
+                    continue
+                emojis_to_add.append(login_emoji)
+                tags_to_add.append("logon-event")
+                tags_to_add.append("rdp")
+                rdp_login_counter += 1
 
             elif identifier in (4634, 4647):
                 attribute_dict = parse_evtx_logoff_event(strings)
@@ -209,9 +258,7 @@ class LoginSketchPlugin(interface.BaseAnalyzer):
         # TODO: Add support for Linux syslog logon/logoff events.
         # TODO: Add support for Mac OS X logon/logoff events.
 
-        return (
-            "Total number of login events processed: {0:d} and " "logoff events: {1:d}"
-        ).format(login_counter, logoff_counter)
+        return (f"Logon events: {login_counter}, logoff events: {logoff_counter}, RDP logons: {rdp_login_counter}")
 
 
 manager.AnalysisManager.register_analyzer(LoginSketchPlugin)
