@@ -314,20 +314,23 @@ export default {
       return this.searchNode || this.$store.state.currentSearchNode
     },
     timelineColor() {
-      let backgroundColor = this.timeline.color
-      if (!backgroundColor.startsWith('#')) {
-        backgroundColor = '#' + backgroundColor
-      }
-      if (this.isDarkTheme) {
+      if (this && this.timeline) {
+        let backgroundColor = this.timeline.color
+        if (!backgroundColor.startsWith('#')) {
+          backgroundColor = '#' + backgroundColor
+        }
+        if (this.isDarkTheme) {
+          return {
+            'background-color': backgroundColor,
+            filter: 'grayscale(25%)',
+            color: '#333',
+          }
+        }
         return {
           'background-color': backgroundColor,
-          filter: 'grayscale(25%)',
-          color: '#333',
         }
       }
-      return {
-        'background-color': backgroundColor,
-      }
+      return {}
     },
     fieldColumnColor() {
       if (this.isSelected) {
